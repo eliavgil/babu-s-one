@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>יובל אוספת! 🌟</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      background: linear-gradient(135deg, #5B1FA8 0%, #C040C0 60%, #FF80B5 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Arial Rounded MT Bold', Arial, sans-serif;
+      overflow: hidden;
+      user-select: none;
+      touch-action: none;
+    }
+    #gameWrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    canvas {
+      display: block;
+      border-radius: 24px;
+      box-shadow: 0 12px 50px rgba(0,0,0,0.4);
+    }
+    #controls {
+      display: flex;
+      gap: 50px;
+    }
+    .ctrl-btn {
+      width: 75px;
+      height: 75px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.92);
+      border: 3px solid rgba(255,255,255,0.5);
+      font-size: 32px;
+      cursor: pointer;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      transition: transform 0.1s, box-shadow 0.1s;
+      touch-action: manipulation;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ctrl-btn:active { transform: scale(0.88); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+  </style>
+</head>
+<body>
+<div id="gameWrapper">
+  <canvas id="c"></canvas>
+  <div id="controls">
+    <button class="ctrl-btn" id="btnL">⬅️</button>
+    <button class="ctrl-btn" id="btnR">➡️</button>
+  </div>
+</div>
+
+<script>
+// ─── Canvas setup ────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+function resize() {
+  const W = Math.min(window.innerWidth - 16, 430);
+  const H = Math.min(window.innerHeight - 115, 680);
+  canvas.width  = W;
+  canvas.height = H;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── State ───────────────────────────────────────────────────────────────────
+const S = { START: 0, PLAYING: 1, OVER: 2 };
+let state = S.START;
+
+let score, lives, level, frame;
+let items, particles, popups, bgStars;
+let spawnTimer, spawnEvery;
+let px, py, pvx;      // player x,y,vx
+let pBounce, pHurt, pCatch;
+
+const SPEED   = 5.5;
+const PW      = 52;   // player hitbox half-width
+const PH      = 85;
+
+// ─── Input ───────────────────────────────────────────────────────────────────
+const keys = {};
+let   btnL = false, btnR = false;
+
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (state === S.START)             { initGame(); return; }
+  if (state === S.OVER && e.key===' '){ state = S.START;  return; }
+  e.preventDefault();
+});
+document.addEventListener('keyup',   e => { keys[e.key] = false; });
+
+function wire(id, setFn) {
+  const el = document.getElementById(id);
+  const on  = () => { setFn(true);  if (state !== S.PLAYING) initGame(); };
+  const off = () => setFn(false);
+  el.addEventListener('mousedown',  on);
+  el.addEventListener('mouseup',    off);
+  el.addEventListener('mouseleave', off);
+  el.addEventListener('touchstart', e => { e.preventDefault(); on();  }, { passive: false });
+  el.addEventListener('touchend',   e => { e.preventDefault(); off(); }, { passive: false });
+}
+wire('btnL', v => btnL = v);
+wire('btnR', v => btnR = v);
+
+canvas.addEventListener('click', e => {
+  if (state === S.START) { initGame(); return; }
+  if (state === S.OVER) {
+    const { x, y } = canvasXY(e);
+    const bx = canvas.width / 2, by = canvas.height - 118;
+    if (Math.abs(x - bx) < 115 && Math.abs(y - by) < 32) state = S.START;
+  }
+});
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (state === S.START) { initGame(); return; }
+  if (state === S.OVER)  { state = S.START; }
+}, { passive: false });
+
+function canvasXY(e) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) * canvas.width  / r.width,
+    y: (e.clientY - r.top)  * canvas.height / r.height,
+  };
+}
+
+// ─── Audio ───────────────────────────────────────────────────────────────────
+let AC;
+function ac() { return AC || (AC = new (window.AudioContext || window.webkitAudioContext)()); }
+
+function tone(freq, type, dur, vol = 0.28) {
+  try {
+    const a = ac(), o = a.createOscillator(), g = a.createGain();
+    o.connect(g); g.connect(a.destination);
+    o.type = type; o.frequency.setValueAtTime(freq, a.currentTime);
+    g.gain.setValueAtTime(vol, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + dur);
+    o.start(); o.stop(a.currentTime + dur);
+  } catch(_) {}
+}
+
+const sfxCatch  = () => { tone(523,'sine',.09); setTimeout(()=>tone(784,'sine',.14),80); };
+const sfxHurt   = () => tone(220,'sawtooth',.3,.18);
+const sfxBonus  = () => [523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,'sine',.15),i*65));
+const sfxLevelUp= () => [392,523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,'sine',.12),i*55));
+
+// ─── Items ───────────────────────────────────────────────────────────────────
+const TYPES = [
+  { e:'🐼', pts:3, rare:0.15 },
+  { e:'🐹', pts:2, rare:0.25 },
+  { e:'🍬', pts:1, rare:0.45 },
+  { e:'❤️', pts:0, rare:0.15, heart:true },
+];
+
+function pickType() {
+  let r = Math.random(), acc = 0;
+  for (const t of TYPES) { acc += t.rare; if (r < acc) return t; }
+  return TYPES[2];
+}
+
+function spawnItem() {
+  const t = pickType();
+  const margin = 28;
+  items.push({
+    x: margin + Math.random() * (canvas.width - margin * 2),
+    y: -32,
+    vy: 2.2 + level * 0.45 + Math.random() * 1.2,
+    rot: 0,
+    rotV: (Math.random() - 0.5) * 0.12,
+    size: 38,
+    t,
+  });
+}
+
+// ─── Particles ───────────────────────────────────────────────────────────────
+function burst(x, y, colors, n = 9, speed = 4) {
+  for (let i = 0; i < n; i++) {
+    const a = (Math.PI * 2 / n) * i;
+    particles.push({
+      x, y,
+      vx: Math.cos(a) * (speed * (0.6 + Math.random())),
+      vy: Math.sin(a) * (speed * (0.6 + Math.random())),
+      life: 1,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      r: 5 + Math.random() * 5,
+    });
+  }
+}
+
+const GOLD   = ['#FFD700','#FFA500','#FFEC6E'];
+const HEARTS = ['#FF4477','#FF88AA','#FF2255'];
+const HURT_C = ['#FF4444','#FF8800'];
+
+// ─── Stars background ─────────────────────────────────────────────────────────
+function initStars() {
+  bgStars = [];
+  for (let i = 0; i < 35; i++) {
+    bgStars.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height * 0.75,
+      r: Math.random() * 2.5 + 0.8,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+function initGame() {
+  score = 0; lives = 3; level = 1; frame = 0;
+  items = []; particles = []; popups = [];
+  spawnTimer = 0; spawnEvery = 85;
+  px = canvas.width / 2;
+  py = canvas.height - PH;
+  pvx = 0; pBounce = 0; pHurt = 0; pCatch = 0;
+  initStars();
+  state = S.PLAYING;
+}
+
+// ─── Update ───────────────────────────────────────────────────────────────────
+function update() {
+  if (state !== S.PLAYING) return;
+  frame++;
+  pBounce += 0.1;
+
+  // movement
+  const goL = keys['ArrowLeft']  || keys['a'] || keys['A'] || btnL;
+  const goR = keys['ArrowRight'] || keys['d'] || keys['D'] || btnR;
+  if      (goL)  pvx = -SPEED;
+  else if (goR)  pvx =  SPEED;
+  else           pvx *= 0.65;
+  px = Math.max(PW / 2, Math.min(canvas.width - PW / 2, px + pvx));
+  if (goL || goR) pBounce += 0.14;
+
+  // animation timers
+  if (pHurt  > 0) pHurt--;
+  if (pCatch > 0) pCatch--;
+
+  // spawn
+  spawnTimer++;
+  if (spawnTimer >= spawnEvery) { spawnItem(); spawnTimer = 0; }
+
+  // level up
+  const newLv = Math.floor(score / 12) + 1;
+  if (newLv > level) {
+    level = newLv;
+    spawnEvery = Math.max(38, 85 - level * 7);
+    burst(canvas.width / 2, canvas.height / 2, GOLD, 14, 6);
+    sfxLevelUp();
+  }
+
+  // items
+  items = items.filter(item => {
+    item.y   += item.vy;
+    item.rot += item.rotV;
+
+    // catch check
+    const dx = Math.abs(item.x - px);
+    const dy = Math.abs(item.y - (py - 28));
+    if (dx < 36 && dy < 42) {
+      if (item.t.heart) {
+        lives = Math.min(3, lives + 1);
+        burst(item.x, item.y, HEARTS, 10, 5);
+        popups.push({ x: item.x, y: item.y, txt: '+❤️', color: '#FF4477', life: 1 });
+        sfxBonus();
+      } else {
+        score += item.t.pts;
+        burst(item.x, item.y, GOLD, 8, 4);
+        popups.push({ x: item.x, y: item.y, txt: `+${item.t.pts}`, color: '#FFD700', life: 1 });
+        sfxCatch();
+      }
+      pCatch = 22;
+      return false;
+    }
+
+    // ground
+    if (item.y > canvas.height - 52) {
+      if (!item.t.heart) {
+        lives--;
+        pHurt = 32;
+        burst(item.x, canvas.height - 52, HURT_C, 7, 3);
+        sfxHurt();
+        if (lives <= 0) { state = S.OVER; }
+      }
+      return false;
+    }
+    return true;
+  });
+
+  // particles
+  particles = particles.filter(p => {
+    p.x += p.vx; p.y += p.vy; p.vy += 0.18; p.life -= 0.028;
+    return p.life > 0;
+  });
+
+  // popups
+  popups = popups.filter(p => {
+    p.y -= 1.8; p.life -= 0.022;
+    return p.life > 0;
+  });
+}
+
+// ─── Draw helpers ─────────────────────────────────────────────────────────────
+function roundRect(x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+  if (fill)   { ctx.fillStyle   = fill;   ctx.fill();   }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); }
+}
+
+function drawBg() {
+  const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  g.addColorStop(0,   '#2E0854');
+  g.addColorStop(0.5, '#7B2FA8');
+  g.addColorStop(1,   '#FF80B5');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // twinkling stars
+  bgStars.forEach(s => {
+    s.phase += 0.04;
+    ctx.save();
+    ctx.globalAlpha = 0.35 + Math.sin(s.phase) * 0.25;
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  });
+
+  // ground
+  const gy = canvas.height - 42;
+  const gg = ctx.createLinearGradient(0, gy, 0, canvas.height);
+  gg.addColorStop(0, '#68C56A'); gg.addColorStop(1, '#3A9B3C');
+  ctx.fillStyle = gg;
+  ctx.fillRect(0, gy, canvas.width, 42);
+
+  // flowers
+  ctx.font = '18px serif';
+  for (let x = 14; x < canvas.width; x += 55) ctx.fillText('🌸', x, canvas.height - 16);
+}
+
+// ── Yuval character ───────────────────────────────────────────────────────────
+function drawYuval(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  const bobY  = Math.sin(pBounce)  * 3;
+  const shakeX = pHurt  > 0 ? Math.sin(pHurt  * 0.7) * 6 : 0;
+  const jumpY  = pCatch > 0 ? -Math.abs(Math.sin(pCatch * 0.25)) * 10 : 0;
+  ctx.translate(shakeX, bobY + jumpY);
+
+  if (pHurt > 0 && Math.floor(pHurt / 4) % 2 === 0) ctx.globalAlpha = 0.45;
+
+  // ── DRESS ────────────────────────────────────────────────────────────────
+  ctx.beginPath();
+  ctx.moveTo(-19, 12);
+  ctx.bezierCurveTo(-24, 24, -30, 50, -22, 74);
+  ctx.lineTo(22, 74);
+  ctx.bezierCurveTo(30, 50, 24, 24, 19, 12);
+  ctx.closePath();
+  const dg = ctx.createLinearGradient(-22, 12, 22, 74);
+  dg.addColorStop(0, '#C850C0');
+  dg.addColorStop(1, '#FF70B0');
+  ctx.fillStyle = dg;
+  ctx.fill();
+
+  // dress sparkle
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '10px serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('✦', -6, 36);
+  ctx.fillText('✦',  7, 52);
+
+  // ── LEGS ─────────────────────────────────────────────────────────────────
+  ctx.fillStyle = '#F0C090';
+  ctx.fillRect(-15, 68, 11, 19);
+  ctx.fillRect(4,   68, 11, 19);
+
+  // shoes
+  ctx.fillStyle = '#8E44AD';
+  ctx.beginPath(); ctx.ellipse(-9,  87, 10, 5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(10,  87, 10, 5, 0, 0, Math.PI * 2); ctx.fill();
+
+  // ── ARMS ─────────────────────────────────────────────────────────────────
+  ctx.strokeStyle = '#F0C090'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-17,18); ctx.quadraticCurveTo(-32,32,-24,48); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( 17,18); ctx.quadraticCurveTo( 32,32, 24,48); ctx.stroke();
+
+  // ── HEAD ─────────────────────────────────────────────────────────────────
+  ctx.beginPath(); ctx.arc(0, 0, 23, 0, Math.PI * 2);
+  ctx.fillStyle = '#F0C090'; ctx.fill();
+  ctx.strokeStyle = '#D8A070'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // ── HAIR (back layer) ─────────────────────────────────────────────────────
+  ctx.fillStyle = '#2E1200';
+  // long side hair
+  ctx.beginPath();
+  ctx.ellipse(-1, 13, 25, 30, 0, 0, Math.PI);
+  ctx.fill();
+
+  // ── HAIR (top/front) ──────────────────────────────────────────────────────
+  ctx.beginPath();
+  ctx.arc(0, -4, 23, Math.PI, Math.PI * 2);
+  ctx.fill();
+
+  // hair wisps
+  ctx.strokeStyle = '#4A2000'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(-23, 4); ctx.quadraticCurveTo(-30,28,-26,50); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( 23, 4); ctx.quadraticCurveTo( 30,28, 26,50); ctx.stroke();
+  // centre parting
+  ctx.beginPath(); ctx.moveTo(0,-23); ctx.quadraticCurveTo(2,-14,0,-7); ctx.stroke();
+
+  // ── FACE ─────────────────────────────────────────────────────────────────
+  // eyes (big dark almond)
+  ctx.fillStyle = '#180800';
+  ctx.beginPath(); ctx.ellipse(-8, -3, 5.5, 6.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( 8, -3, 5.5, 6.5, 0, 0, Math.PI * 2); ctx.fill();
+
+  // eye shine
+  ctx.fillStyle = 'white';
+  ctx.beginPath(); ctx.arc(-6, -5, 2.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(10, -5, 2.2, 0, Math.PI * 2); ctx.fill();
+
+  // lashes
+  ctx.strokeStyle = '#180800'; ctx.lineWidth = 1.4;
+  [[-13,-7,-15,-11],[-10,-9,-10,-13],[-7,-9,-6,-13],
+   [ 7,-9,  6,-13],[10,-9, 10,-13],[13,-7, 15,-11]]
+    .forEach(([x1,y1,x2,y2]) => {
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    });
+
+  // cheeks
+  ctx.fillStyle = 'rgba(255,130,130,0.32)';
+  ctx.beginPath(); ctx.ellipse(-14, 6, 6.5, 4, -0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( 14, 6, 6.5, 4,  0.3, 0, Math.PI * 2); ctx.fill();
+
+  // mouth
+  ctx.strokeStyle = '#B06050'; ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  if      (pCatch > 0) ctx.arc(0, 9, 9, 0, Math.PI);        // big smile
+  else if (pHurt  > 0) ctx.arc(0,14, 7, Math.PI, 0);        // sad
+  else                 ctx.arc(0, 9, 7, 0.2, Math.PI - 0.2); // normal
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawItems() {
+  items.forEach(item => {
+    ctx.save();
+    ctx.translate(item.x, item.y);
+    ctx.rotate(item.rot);
+    ctx.font = `${item.size}px serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(item.t.e, 0, 0);
+    ctx.restore();
+  });
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle   = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  });
+}
+
+function drawPopups() {
+  popups.forEach(p => {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.font = 'bold 30px Arial';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 4;
+    ctx.strokeText(p.txt, p.x, p.y);
+    ctx.fillStyle = p.color; ctx.fillText(p.txt, p.x, p.y);
+    ctx.restore();
+  });
+}
+
+function drawHUD() {
+  // bar
+  roundRect(8, 8, canvas.width - 16, 48, 14, 'rgba(0,0,0,0.25)');
+
+  // lives
+  ctx.font = '26px serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  let h = '';
+  for (let i = 0; i < 3; i++) h += i < lives ? '❤️' : '🖤';
+  ctx.fillText(h, 14, 32);
+
+  // score
+  ctx.fillStyle = 'white'; ctx.font = 'bold 22px Arial';
+  ctx.textAlign = 'right';
+  ctx.fillText(`ניקוד: ${score}`, canvas.width - 14, 32);
+
+  // level
+  ctx.fillStyle = 'rgba(255,255,180,0.9)'; ctx.font = 'bold 13px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(`שלב ${level}`, canvas.width / 2, 32);
+}
+
+// ─── Screens ─────────────────────────────────────────────────────────────────
+function drawStart() {
+  drawBg();
+  initStars(); // refresh every frame for animation
+
+  // title panel
+  roundRect(18, 52, canvas.width - 36, 185, 22, 'rgba(255,255,255,0.18)');
+
+  // glow title
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = `bold ${canvas.width > 360 ? 50 : 40}px Arial`;
+  ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 20;
+  ctx.fillStyle = '#FFD700';
+  ctx.strokeStyle = '#9B2DB6'; ctx.lineWidth = 5;
+  ctx.strokeText('יובל אוספת!', canvas.width / 2, 138);
+  ctx.fillText('יובל אוספת!',   canvas.width / 2, 138);
+  ctx.shadowBlur = 0;
+
+  ctx.font = '30px serif';
+  ctx.fillText('🐼  🐹  🍬  ❤️', canvas.width / 2, 195);
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '16px Arial';
+  ctx.fillText('אספי כמה שיותר!', canvas.width / 2, 225);
+
+  // character preview
+  drawYuval(canvas.width / 2, canvas.height / 2 + 22);
+
+  // start button
+  const by = canvas.height - 115;
+  const bg = ctx.createLinearGradient(0, by - 28, 0, by + 28);
+  bg.addColorStop(0,'#FFD700'); bg.addColorStop(1,'#FF9900');
+  roundRect(canvas.width / 2 - 115, by - 28, 230, 56, 28, bg);
+  ctx.fillStyle = '#6B1FA8'; ctx.font = 'bold 22px Arial'; ctx.textBaseline = 'middle';
+  ctx.fillText('התחילי לשחק! 🎮', canvas.width / 2, by);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = '13px Arial';
+  ctx.fillText('לחצי על החצים למטה להזזה', canvas.width / 2, canvas.height - 48);
+}
+
+function drawOver() {
+  drawBg();
+
+  ctx.fillStyle = 'rgba(0,0,0,0.42)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  roundRect(28, 72, canvas.width - 56, canvas.height - 155, 26, 'rgba(255,255,255,0.95)');
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+  ctx.fillStyle = '#8E2DB6'; ctx.font = 'bold 36px Arial';
+  ctx.fillText('כל הכבוד יובל! 🎉', canvas.width / 2, 130);
+
+  ctx.font = '58px serif';
+  ctx.fillText('⭐', canvas.width / 2, 198);
+
+  ctx.fillStyle = '#333'; ctx.font = 'bold 30px Arial';
+  ctx.fillText(`ניקוד: ${score}`, canvas.width / 2, 258);
+
+  ctx.fillStyle = '#666'; ctx.font = '20px Arial';
+  ctx.fillText(`הגעת לשלב ${level}`, canvas.width / 2, 295);
+
+  // star rating
+  const stars = score < 10 ? 1 : score < 28 ? 2 : 3;
+  ctx.font = '38px serif';
+  ctx.fillText('⭐'.repeat(stars) + (stars < 3 ? '☆'.repeat(3 - stars) : ''), canvas.width / 2, 348);
+
+  // replay
+  const by = canvas.height - 118;
+  const bg = ctx.createLinearGradient(0, by - 27, 0, by + 27);
+  bg.addColorStop(0,'#FF69C0'); bg.addColorStop(1,'#D63090');
+  roundRect(canvas.width / 2 - 115, by - 27, 230, 54, 27, bg);
+  ctx.fillStyle = 'white'; ctx.font = 'bold 22px Arial';
+  ctx.fillText('שחקי שוב! 🎮', canvas.width / 2, by);
+}
+
+// ─── Game loop ────────────────────────────────────────────────────────────────
+function loop() {
+  update();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if      (state === S.START)   { drawStart(); }
+  else if (state === S.OVER)    { drawOver(); drawParticles(); }
+  else { // PLAYING
+    drawBg();
+    drawItems();
+    drawParticles();
+    drawYuval(px, py);
+    drawPopups();
+    drawHUD();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+initStars();
+px = canvas.width / 2;
+py = canvas.height - PH;
+loop();
+</script>
+</body>
+</html>
