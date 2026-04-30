@@ -4,16 +4,16 @@ import { TEACHER } from '../data';
 type Page = 'dashboard' | 'assessment' | 'tutor' | 'observation' | 'substitute' | 'meetings' | 'tracking' | 'payments' | 'parentcomms' | 'support';
 
 const NAV_ITEMS: { id: Page; label: string; icon: string }[] = [
-  { id: 'dashboard',    label: 'עמוד הבית',               icon: '🏠' },
-  { id: 'assessment',   label: 'משימות הערכה',             icon: '📝' },
-  { id: 'tutor',        label: 'בוטים אישיים לתלמידים',   icon: '🤖' },
-  { id: 'observation',  label: 'שיעורי צפייה',             icon: '👁' },
-  { id: 'substitute',   label: 'מאגר מילוי מקום',         icon: '📚' },
-  { id: 'meetings',     label: 'סיכום ישיבות',             icon: '🎙' },
-  { id: 'tracking',     label: 'מעקב פדגוגי-חברתי',       icon: '📊' },
-  { id: 'payments',     label: 'ניהול תשלומים',            icon: '💳' },
-  { id: 'parentcomms',  label: 'תקשורת הורים',             icon: '💬' },
-  { id: 'support',      label: 'מענים אישיים',             icon: '🧩' },
+  { id: 'dashboard',    label: 'עמוד הבית',                     icon: '🏠' },
+  { id: 'support',      label: 'מענים אישיים',                  icon: '🧩' },
+  { id: 'tracking',     label: 'מעקב פדגוגי-רגשי-חברתי',       icon: '📊' },
+  { id: 'parentcomms',  label: 'תקשורת הורים',                  icon: '💬' },
+  { id: 'assessment',   label: 'משימות הערכה',                  icon: '📝' },
+  { id: 'substitute',   label: 'מאגר מילוי מקום',              icon: '📚' },
+  { id: 'tutor',        label: 'בוטים אישיים',                  icon: '🤖' },
+  { id: 'meetings',     label: 'סיכום ישיבות',                  icon: '🎙' },
+  { id: 'observation',  label: 'שיעורי צפייה',                  icon: '👁' },
+  { id: 'payments',     label: 'ניהול תשלומים',                 icon: '💳' },
 ];
 
 interface LayoutProps {
