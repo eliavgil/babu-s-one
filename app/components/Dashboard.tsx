@@ -1,113 +1,166 @@
 'use client';
-import { STUDENTS, DASHBOARD_TASKS, DASHBOARD_EVENTS, WEEK_DATES, DAYS_HEBREW, AttendanceStatus } from '../data';
+import { STUDENTS, DASHBOARD_TASKS, DASHBOARD_EVENTS, AttendanceStatus, Student } from '../data';
 import { useState } from 'react';
 import AssistantBar, { SchoolActions } from './AssistantBar';
 
-const statusColor: Record<AttendanceStatus, string> = {
-  'נוכח':  'bg-green-100 text-green-700',
-  'חיסור': 'bg-red-100 text-red-600',
-  'איחור': 'bg-amber-100 text-amber-700',
-};
-const statusDot: Record<AttendanceStatus, string> = {
-  'נוכח':  'bg-green-500',
-  'חיסור': 'bg-red-500',
-  'איחור': 'bg-amber-400',
+function getAbsentStreak(attendance: AttendanceStatus[]): number {
+  let streak = 0;
+  for (let i = attendance.length - 1; i >= 0; i--) {
+    if (attendance[i] === 'חיסור') streak++;
+    else break;
+  }
+  return streak;
+}
+
+const AI_TIPS: Record<number, string> = {
+  1:  'ציון יפה במבחן האחרון (78). ממשיך במגמה יציבה.',
+  2:  'שיפור ניכר בציונים לאחרונה. כדאי לחזק את המוטיבציה.',
+  3:  'נפגש עם היועצת אתמול — המשך מעקב מומלץ.',
+  4:  'ציון מצוין (91). מועמד לתוכנית מצוינות.',
+  5:  'ריבוי חיסורים השבוע — כדאי לדבר עם ההורים.',
+  6:  'יום הולדת עוד 5 ימים! כדאי לאחל בכיתה.',
+  7:  'מעקב פעיל — נמצא בתהליך עם היועצת. ראה פרופיל מלא.',
+  8:  'ביצועים מצוינים (88). יציב וממוקד.',
+  9:  'חיסור היום — לא קיבלנו אישור מההורים.',
+  10: 'ממתין לאישור הנחה בתשלומים — לא לשכוח לעדכן.',
+  11: 'הציון הגבוה בכיתה (94). שקלי להציע העשרה נוספת.',
+  12: 'איחרה היום — אמא שלחה הודעה שהייתה פגישה רפואית.',
+  13: 'מלגה מלאה מאושרת. תפקוד תקין.',
+  14: 'הגישה את הפרויקט בזמן — עבודה מרשימה.',
+  15: 'ציון 90 — יציבה ומצטיינת.',
+  16: 'פיגור בתשלום — הסכם פריסה בתהליך.',
+  17: 'ציון 95 — המצטיינת של הכיתה השבוע.',
+  18: 'חיסרה ביום רביעי — הגישה אישור.',
+  19: 'כל המשימות מוגשות בזמן. תלמידה מסודרת.',
+  20: 'קשיים כלכליים בבית — נמסר לרכזת רווחה.',
 };
 
-export default function Dashboard({ onViewProfile, onNavigate, onOpenBotPage, schoolActions }: { onViewProfile: () => void; onNavigate: (p: string) => void; onOpenBotPage: () => void; schoolActions: SchoolActions }) {
+const ALERTS: Record<number, string> = {
+  5:  'ריבוי חיסורים ואיחורים — 4 ימים החודש. לא הביא אישור הורים לטיול.',
+  7:  'שני חיסורים ברצף באמצע השבוע. ציון ספרות בירידה.',
+  9:  'חיסור היום ללא אישור הורים.',
+  20: 'ציון נמוך (59) + 2 חיסורים השבוע.',
+};
+
+type TooltipState = { text: string; x: number; y: number; kind: 'tip' | 'alert' } | null;
+
+function StudentCard({
+  student,
+  onViewProfile,
+  onTooltip,
+}: {
+  student: Student;
+  onViewProfile: () => void;
+  onTooltip: (t: TooltipState) => void;
+}) {
+  const streak = getAbsentStreak(student.attendance);
+  const tip = AI_TIPS[student.id];
+  const alert = ALERTS[student.id] || (streak >= 2 ? `${streak} ימי חיסור ברצף` : null);
+
+  const streakBg =
+    streak === 0 ? 'bg-green-100 text-green-700' :
+    streak === 1 ? 'bg-amber-100 text-amber-700' :
+                   'bg-red-100 text-red-700';
+
+  const show = (e: React.MouseEvent, kind: 'tip' | 'alert') => {
+    const text = kind === 'tip' ? tip : alert;
+    if (!text) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    onTooltip({ text, x: rect.left + rect.width / 2, y: rect.top, kind });
+  };
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-xl border border-gray-100 transition-colors">
+      <img src={student.photo} alt={student.name} className="w-8 h-8 rounded-full object-cover shrink-0" />
+      <button
+        onClick={student.id === 7 ? onViewProfile : undefined}
+        className={`text-sm font-medium text-right leading-tight flex-1 min-w-0 truncate ${
+          student.id === 7 ? 'text-blue-600 hover:underline cursor-pointer' : 'text-gray-800 cursor-default'
+        }`}
+      >
+        {student.name}
+      </button>
+      <div className="flex items-center gap-0.5 shrink-0">
+        <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${streakBg}`}>
+          {streak}
+        </span>
+        <button
+          onMouseEnter={e => show(e, 'tip')}
+          onMouseLeave={() => onTooltip(null)}
+          onClick={e => show(e, 'tip')}
+          className="w-7 h-7 flex items-center justify-center text-base hover:scale-110 transition-transform"
+        >
+          🤖
+        </button>
+        {alert ? (
+          <button
+            onMouseEnter={e => show(e, 'alert')}
+            onMouseLeave={() => onTooltip(null)}
+            onClick={e => show(e, 'alert')}
+            className="w-7 h-7 flex items-center justify-center text-base hover:scale-110 transition-transform"
+          >
+            🛑
+          </button>
+        ) : (
+          <span className="w-7 h-7" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function Dashboard({
+  onViewProfile,
+  onNavigate,
+  onOpenBotPage,
+  schoolActions,
+}: {
+  onViewProfile: () => void;
+  onNavigate: (p: string) => void;
+  onOpenBotPage: () => void;
+  schoolActions: SchoolActions;
+}) {
   const [tasks, setTasks] = useState(DASHBOARD_TASKS);
-  const todayAbsences = STUDENTS.filter(s => s.attendance[4] === 'חיסור').length;
-  const todayLate     = STUDENTS.filter(s => s.attendance[4] === 'איחור').length;
-  const weekAbsences  = STUDENTS.reduce((sum, s) => sum + s.attendance.filter(a => a === 'חיסור').length, 0);
+  const [tooltip, setTooltip] = useState<TooltipState>(null);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Assistant bar */}
       <AssistantBar onNavigate={onNavigate} onOpenBotPage={onOpenBotPage} actions={schoolActions} />
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">שלום, דוד 👋</h1>
-          <p className="text-gray-500 text-sm mt-0.5">יום חמישי, 24 באפריל 2026 | כיתת החינוך: י׳ג</p>
-        </div>
-        <div className="flex gap-3">
-          <div className="bg-white rounded-xl shadow-sm border px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-red-500">{todayAbsences}</p>
-            <p className="text-xs text-gray-500">חיסורים היום</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-amber-500">{todayLate}</p>
-            <p className="text-xs text-gray-500">איחורים היום</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-blue-600">{weekAbsences}</p>
-            <p className="text-xs text-gray-500">חיסורים השבוע</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-green-600">20</p>
-            <p className="text-xs text-gray-500">תלמידים בכיתה</p>
-          </div>
-        </div>
-      </div>
-
       <div className="grid grid-cols-3 gap-6">
-        {/* Students grid - takes 2 columns */}
+        {/* Students — 2 columns */}
         <div className="col-span-2 bg-white rounded-2xl shadow-sm border overflow-hidden">
-          <div className="px-5 py-4 border-b flex items-center justify-between">
-            <h2 className="font-bold text-gray-800">תלמידי כיתה י׳ג — נוכחות שבועית</h2>
-            <div className="flex gap-4 text-xs text-gray-500">
-              {DAYS_HEBREW.map((d, i) => (
-                <span key={i} className="w-12 text-center font-medium">{d}<br /><span className="text-gray-400">{WEEK_DATES[i]}</span></span>
-              ))}
-            </div>
+          <div className="px-5 py-4 border-b">
+            <h2 className="font-bold text-gray-800">תלמידי הכיתה</h2>
           </div>
-          <div className="divide-y max-h-[500px] overflow-y-auto">
+          <div className="p-3 grid grid-cols-2 gap-1.5 max-h-[540px] overflow-y-auto">
             {STUDENTS.map(student => (
-              <div key={student.id} className="flex items-center px-5 py-2.5 hover:bg-gray-50 transition-colors">
-                <div className="flex items-center gap-3 w-44 shrink-0">
-                  <img
-                    src={student.photo}
-                    alt={student.name}
-                    className="w-9 h-9 rounded-full object-cover"
-                  />
-                  <button
-                    onClick={student.id === 7 ? onViewProfile : undefined}
-                    className={`text-sm font-medium text-right leading-tight ${student.id === 7 ? 'text-blue-600 hover:underline cursor-pointer' : 'text-gray-800'}`}
-                  >
-                    {student.name}
-                  </button>
-                </div>
-                <div className="flex gap-4 mr-auto">
-                  {student.attendance.map((status, i) => (
-                    <div key={i} className="w-12 flex justify-center">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[status]}`}>
-                        {status === 'נוכח' ? '✓' : status === 'חיסור' ? '✕' : 'א'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <StudentCard
+                key={student.id}
+                student={student}
+                onViewProfile={onViewProfile}
+                onTooltip={setTooltip}
+              />
             ))}
           </div>
-          <div className="px-5 py-3 border-t bg-gray-50 flex gap-4 text-xs text-gray-500">
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 inline-block"/>נוכח</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500 inline-block"/>חיסור</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block"/>איחור</span>
-            <span className="mr-auto text-blue-600 cursor-pointer hover:underline" onClick={onViewProfile}>← לחץ על "דניאל מזרחי" לפרופיל מפורט</span>
-          </div>
         </div>
 
-        {/* Right column: tasks + events */}
+        {/* Right column */}
         <div className="space-y-5">
-          {/* Tasks */}
           <div className="bg-white rounded-2xl shadow-sm border">
             <div className="px-5 py-4 border-b">
               <h2 className="font-bold text-gray-800">משימות לביצוע</h2>
             </div>
             <div className="p-4 space-y-2">
               {tasks.map(task => (
-                <div key={task.id} className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${task.done ? 'bg-gray-50 opacity-60' : task.urgent ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}>
+                <div
+                  key={task.id}
+                  className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
+                    task.done ? 'bg-gray-50 opacity-60' :
+                    task.urgent ? 'bg-red-50 border-red-200' :
+                    'bg-white border-gray-100'
+                  }`}
+                >
                   <input
                     type="checkbox"
                     checked={task.done}
@@ -124,7 +177,6 @@ export default function Dashboard({ onViewProfile, onNavigate, onOpenBotPage, sc
             </div>
           </div>
 
-          {/* Events */}
           <div className="bg-white rounded-2xl shadow-sm border">
             <div className="px-5 py-4 border-b">
               <h2 className="font-bold text-gray-800">אירועים קרובים</h2>
@@ -142,6 +194,25 @@ export default function Dashboard({ onViewProfile, onNavigate, onOpenBotPage, sc
           </div>
         </div>
       </div>
+
+      {/* Floating tooltip — rendered at root level to avoid overflow clipping */}
+      {tooltip && (
+        <div
+          style={{
+            position: 'fixed',
+            left: tooltip.x,
+            top: tooltip.y - 10,
+            transform: 'translate(-50%, -100%)',
+            zIndex: 9999,
+            pointerEvents: 'none',
+          }}
+          className={`text-xs text-white rounded-xl px-3 py-2 shadow-xl max-w-[220px] text-right leading-relaxed ${
+            tooltip.kind === 'alert' ? 'bg-red-700' : 'bg-slate-800'
+          }`}
+        >
+          {tooltip.text}
+        </div>
+      )}
     </div>
   );
 }
