@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+button, a {
+  touch-action: manipulation;
+}
