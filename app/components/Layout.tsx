@@ -8,7 +8,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: string }[] = [
   { id: 'support',      label: 'מענים אישיים',                  icon: '🧩' },
   { id: 'tracking',     label: 'מעקב פדגוגי-רגשי-חברתי',       icon: '📊' },
   { id: 'parentcomms',  label: 'תקשורת הורים',                  icon: '💬' },
-  { id: 'assessment',   label: 'משימות הערכה',                  icon: '📝' },
+  { id: 'assessment',   label: 'מאגר משימות הערכה',             icon: '📝' },
   { id: 'substitute',   label: 'מאגר מילוי מקום',              icon: '📚' },
   { id: 'tutor',        label: 'בוטים אישיים',                  icon: '🤖' },
   { id: 'meetings',     label: 'סיכום ישיבות',                  icon: '🎙' },
